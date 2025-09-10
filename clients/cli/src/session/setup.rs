@@ -70,6 +70,7 @@ pub fn warn_memory_configuration(max_threads: Option<u32>) {
 /// * `config` - Resolved configuration with node_id and client_id
 /// * `env` - Environment to connect to
 /// * `max_threads` - Optional maximum number of threads for proving
+/// * `max_difficulty` - Optional override for task difficulty
 ///
 /// # Returns
 /// * `Ok(SessionData)` - Successfully set up session
@@ -80,6 +81,7 @@ pub async fn setup_session(
     check_mem: bool,
     max_threads: Option<u32>,
     max_tasks: Option<u32>,
+    max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
 ) -> Result<SessionData, Box<dyn Error>> {
     let node_id = config.node_id.parse::<u64>()?;
     let client_id = config.user_id;
@@ -96,8 +98,8 @@ pub async fn setup_session(
         warn_memory_configuration(max_threads);
     }
 
-    // Clamp the number of workers to [1,8]. Keep this low for now to avoid rate limiting.
-    let num_workers: usize = max_threads.unwrap_or(1).clamp(1, 8) as usize;
+    // Clamp the number of workers to [1,24]. Keep this low for now to avoid rate limiting.
+    let num_workers: usize = max_threads.unwrap_or(1).clamp(1, 24) as usize;
 
     // Create shutdown channel - only one shutdown signal needed
     let (shutdown_sender, _) = broadcast::channel(1);
@@ -115,6 +117,7 @@ pub async fn setup_session(
         client_id,
         max_tasks,
         num_workers,
+        max_difficulty,
     )
     .await;
 
@@ -126,5 +129,6 @@ pub async fn setup_session(
         node_id,
         orchestrator: orchestrator_client,
         num_workers,
+        max_difficulty,
     })
 }

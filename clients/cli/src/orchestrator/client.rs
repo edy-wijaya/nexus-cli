@@ -5,7 +5,7 @@
 use crate::environment::Environment;
 use crate::nexus_orchestrator::{
     GetProofTaskRequest, GetProofTaskResponse, NodeType, RegisterNodeRequest, RegisterNodeResponse,
-    RegisterUserRequest, SubmitProofRequest, TaskDifficulty, UserResponse,
+    RegisterUserRequest, SubmitProofRequest, UserResponse,
 };
 use crate::orchestrator::Orchestrator;
 use crate::orchestrator::error::OrchestratorError;
@@ -377,12 +377,13 @@ impl Orchestrator for OrchestratorClient {
         &self,
         node_id: &str,
         verifying_key: VerifyingKey,
+        max_difficulty: crate::nexus_orchestrator::TaskDifficulty,
     ) -> Result<Task, OrchestratorError> {
         let request = GetProofTaskRequest {
             node_id: node_id.to_string(),
             node_type: NodeType::CliProver as i32,
             ed25519_public_key: verifying_key.to_bytes().to_vec(),
-            max_difficulty: TaskDifficulty::Large as i32,
+            max_difficulty: max_difficulty as i32,
         };
         let request_bytes = Self::encode_request(&request);
         let response: GetProofTaskResponse = self.post_request("v3/tasks", request_bytes).await?;
@@ -478,7 +479,13 @@ mod live_orchestrator_tests {
         let node_id = "5880437"; // Example node ID
         let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
         let verifying_key = signing_key.verifying_key();
-        let result = client.get_proof_task(node_id, verifying_key).await;
+        let result = client
+            .get_proof_task(
+                node_id,
+                verifying_key,
+                crate::nexus_orchestrator::TaskDifficulty::SmallMedium,
+            )
+            .await;
         match result {
             Ok(task) => {
                 println!("Got proof task: {}", task);

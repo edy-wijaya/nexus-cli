@@ -70,6 +70,7 @@ pub struct WorkerConfig {
     pub environment: crate::environment::Environment,
     pub client_id: String,
     pub num_workers: usize,
+    pub max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
 }
 
 impl WorkerConfig {
@@ -77,11 +78,13 @@ impl WorkerConfig {
         environment: crate::environment::Environment,
         client_id: String,
         num_workers: usize,
+        max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
     ) -> Self {
         Self {
             environment,
             client_id,
             num_workers,
+            max_difficulty: None,
         }
     }
 }
