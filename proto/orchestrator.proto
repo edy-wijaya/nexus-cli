@@ -50,6 +50,10 @@ message Task {
   repeated bytes public_inputs_list = 5;
   // The type of task (proof required or only hash)
   TaskType task_type = 6;
+  // The actual difficulty level assigned to this task by the server.
+  // This accounts for reputation-based gating and allows clients to track
+  // the actual difficulty they're receiving vs what they requested.
+  TaskDifficulty difficulty = 7;
 }
 
 // Get outstanding tasks for a node.

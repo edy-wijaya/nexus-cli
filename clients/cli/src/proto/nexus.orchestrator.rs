@@ -43,6 +43,11 @@ pub struct Task {
     /// The type of task (proof required or only hash)
     #[prost(enumeration = "TaskType", tag = "6")]
     pub task_type: i32,
+    /// The actual difficulty level assigned to this task by the server.
+    /// This accounts for reputation-based gating and allows clients to track
+    /// the actual difficulty they're receiving vs what they requested.
+    #[prost(enumeration = "TaskDifficulty", tag = "7")]
+    pub difficulty: i32,
 }
 /// Get outstanding tasks for a node.
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -147,9 +147,6 @@ impl TaskFetcher {
             }
         };
 
-        // Store the requested difficulty for later tracking
-        self.last_requested_difficulty = Some(desired);
-
         match self
             .network_client
             .fetch_task(
@@ -160,11 +157,11 @@ impl TaskFetcher {
             )
             .await
         {
-            Ok(task) => {
+            Ok(proof_task_result) => {
                 // Log successful fetch
                 self.event_sender
                     .send_task_event(
-                        format!("Step 1 of 4: Got task {}", task.task_id),
+                        format!("Step 1 of 4: Got task {}", proof_task_result.task.task_id),
                         EventType::Success,
                         LogLevel::Info,
                     )
@@ -172,12 +169,15 @@ impl TaskFetcher {
 
                 // Track analytics for successful fetch
                 tokio::spawn(track_got_task(
-                    task.clone(),
+                    proof_task_result.task.clone(),
                     self.config.environment.clone(),
                     self.config.client_id.clone(),
                 ));
 
-                Ok(task)
+                // Store the actual difficulty received from server for success tracking
+                self.last_requested_difficulty = Some(proof_task_result.actual_difficulty);
+
+                Ok(proof_task_result.task)
             }
             Err(e) => {
                 // Log fetch failure with appropriate level
@@ -196,6 +196,7 @@ impl TaskFetcher {
     }
 
     /// Update success tracking after completing a task
+    /// Uses the actual difficulty received from the server
     pub fn update_success_tracking(&mut self, duration_secs: u64) {
         if let Some(difficulty) = self.last_requested_difficulty {
             self.last_success_difficulty = Some(difficulty);
@@ -229,15 +230,21 @@ mod tests {
             &self,
             _node_id: &str,
             _verifying_key: VerifyingKey,
-            _max_difficulty: crate::nexus_orchestrator::TaskDifficulty,
-        ) -> Result<Task, OrchestratorError> {
-            // Return a mock task with the requested difficulty
-            Ok(Task {
+            max_difficulty: crate::nexus_orchestrator::TaskDifficulty,
+        ) -> Result<crate::orchestrator::client::ProofTaskResult, OrchestratorError> {
+            // Return a mock task with the requested difficulty as actual difficulty
+            let task = Task {
                 task_id: "test_task".to_string(),
                 program_id: "test_program".to_string(),
                 public_inputs: vec![1, 2, 3],
                 public_inputs_list: vec![vec![1, 2, 3]],
                 task_type: crate::nexus_orchestrator::TaskType::ProofHash,
+                difficulty: crate::nexus_orchestrator::TaskDifficulty::Medium,
+            };
+
+            Ok(crate::orchestrator::client::ProofTaskResult {
+                task,
+                actual_difficulty: max_difficulty,
             })
         }
 
