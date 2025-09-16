@@ -27,7 +27,7 @@ pub async fn start_authenticated_worker(
     broadcast::Sender<()>,
 ) {
 
-    let mut config = WorkerConfig::new(environment, client_id, num_workers, max_difficulty);
+    let mut config = WorkerConfig::new(environment, client_id, num_workers);
     config.max_difficulty = max_difficulty;
    
     let (event_sender, event_receiver) =

@@ -78,7 +78,6 @@ impl WorkerConfig {
         environment: crate::environment::Environment,
         client_id: String,
         num_workers: usize,
-        max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
     ) -> Self {
         Self {
             environment,

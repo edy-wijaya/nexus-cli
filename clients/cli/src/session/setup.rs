@@ -29,7 +29,6 @@ pub struct SessionData {
     pub orchestrator: OrchestratorClient,
     /// Number of workers (for display purposes)
     pub num_workers: usize,
-    pub max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
 }
 
 /// Warn the user if their available memory seems insufficient for the task(s) at hand
@@ -130,6 +129,5 @@ pub async fn setup_session(
         node_id,
         orchestrator: orchestrator_client,
         num_workers,
-        max_difficulty,
     })
 }
