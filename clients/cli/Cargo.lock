@@ -1677,7 +1677,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-network"
-version = "0.10.12"
+version = "0.10.13"
 dependencies = [
  "assert_cmd",
  "async-trait",
