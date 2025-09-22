@@ -34,6 +34,10 @@ use postcard::to_allocvec;
 use std::error::Error;
 use std::io::Write;
 use std::process::exit;
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// All available difficulty levels as (name, enum_value) pairs
 const DIFFICULTY_LEVELS: &[(&str, crate::nexus_orchestrator::TaskDifficulty)] = &[
