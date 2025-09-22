@@ -26,10 +26,9 @@ pub async fn start_authenticated_worker(
     Vec<JoinHandle<()>>,
     broadcast::Sender<()>,
 ) {
-
     let mut config = WorkerConfig::new(environment, client_id, num_workers);
     config.max_difficulty = max_difficulty;
-   
+
     let (event_sender, event_receiver) =
         mpsc::channel::<Event>(crate::consts::cli_consts::EVENT_QUEUE_SIZE);
 
