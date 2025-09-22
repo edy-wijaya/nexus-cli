@@ -332,6 +332,18 @@ mod tests {
             validate_difficulty("extra_large_2"),
             Some(TaskDifficulty::ExtraLarge2)
         );
+        assert_eq!(
+            validate_difficulty("extra_large_3"),
+            Some(TaskDifficulty::ExtraLarge3)
+        );
+        assert_eq!(
+            validate_difficulty("extra_large_4"),
+            Some(TaskDifficulty::ExtraLarge4)
+        );
+        assert_eq!(
+            validate_difficulty("extra_large_5"),
+            Some(TaskDifficulty::ExtraLarge5)
+        );
 
         // Test invalid difficulty levels
         assert_eq!(validate_difficulty("invalid"), None);
@@ -350,6 +362,9 @@ mod tests {
             "LARGE" => Some(TaskDifficulty::Large),
             "EXTRA_LARGE" => Some(TaskDifficulty::ExtraLarge),
             "EXTRA_LARGE_2" => Some(TaskDifficulty::ExtraLarge2),
+            "EXTRA_LARGE_3" => Some(TaskDifficulty::ExtraLarge3),
+            "EXTRA_LARGE_4" => Some(TaskDifficulty::ExtraLarge4),
+            "EXTRA_LARGE_5" => Some(TaskDifficulty::ExtraLarge5),
             _ => None,
         }
     }
