@@ -12,6 +12,9 @@ build_proto = []
 name = "nexus-network"
 path = "src/main.rs"
 
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
 [profile.dev]
 opt-level = 1
 
