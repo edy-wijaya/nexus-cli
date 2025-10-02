@@ -56,7 +56,7 @@ impl ProvingPipeline {
         let client_id_shared = Arc::new(client_id.to_string());
 
         // Create a semaphore with a specific number of permits
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(num_workers));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(*num_workers));
 
         // Create cancellation token for graceful shutdown
         let cancellation_token = CancellationToken::new();
