@@ -38,25 +38,19 @@ pub fn warn_memory_configuration(thread_count: usize, available_memory_bytes: Op
     }
 
     if let Some(available_bytes) = available_memory_bytes {
-        let Some(usable_budget_bytes) = usable_memory_budget_bytes(available_bytes) else {
-            return;
-        };
-
         let required_bytes = (thread_count as u128)
             * (crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT as u128);
+        let available_bytes = available_bytes as u128;
 
-        if required_bytes > usable_budget_bytes {
-            let gib = 1024_f64.powi(3);
-            let required_gib = required_bytes as f64 / gib;
-            let usable_gib = usable_budget_bytes as f64 / gib;
-            let available_gib = available_bytes as f64 / gib;
+        if required_bytes > available_bytes {
+            let required_gib = required_bytes as f64 / 1024_f64.powi(3);
+            let available_gib = available_bytes as f64 / 1024_f64.powi(3);
 
             crate::print_cmd_warn!(
                 "OOM warning",
-                "Estimated memory usage (~{:.1} GiB) for {} thread(s) exceeds the configured safe memory budget (~{:.1} GiB of ~{:.1} GiB total). If proving fails due to an out-of-memory error, please restart the Nexus CLI with a smaller value supplied to `--max-threads`.",
+                "Estimated memory usage (~{:.1} GiB) for {} thread(s) exceeds available memory (~{:.1} GiB). If proving fails due to an out-of-memory error, please restart the Nexus CLI with a smaller value supplied to `--max-threads`.",
                 required_gib,
                 thread_count,
-                usable_gib,
                 available_gib
             );
             std::thread::sleep(std::time::Duration::from_secs(3));
@@ -100,11 +94,11 @@ pub async fn setup_session(
     let orchestrator_client = OrchestratorClient::new(env.clone());
 
     let available_memory_bytes = system_available_memory_bytes();
-    let safe_memory_budget_bytes = available_memory_bytes.and_then(usable_memory_budget_bytes);
     let hardware_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1_usize);
-    let memory_limited_threads = safe_memory_budget_bytes.map(threads_supported_by_budget);
+    let memory_limited_threads =
+        available_memory_bytes.and_then(|bytes| threads_supported_by_available_memory(bytes));
 
     let auto_threads = memory_limited_threads
         .map(|limit| limit.min(hardware_threads))
@@ -116,20 +110,9 @@ pub async fn setup_session(
         .unwrap_or(auto_threads);
 
     if max_threads.is_none() {
-        let memory_message = if let (Some(limit), Some(budget_bytes), Some(available_bytes)) = (
-            memory_limited_threads,
-            safe_memory_budget_bytes,
-            available_memory_bytes,
-        ) {
-            let gib = 1024_f64.powi(3);
-            let safe_gib = budget_bytes as f64 / gib;
-            let available_gib = available_bytes as f64 / gib;
-            format!(
-                "memory budget (~{safe_gib:.1} GiB of ~{available_gib:.1} GiB total) suggests up to {limit} thread(s)"
-            )
-        } else {
-            "memory estimate unavailable".to_string()
-        };
+        let memory_message = memory_limited_threads
+            .map(|limit| format!("memory suggests up to {limit} thread(s)"))
+            .unwrap_or_else(|| "memory estimate unavailable".to_string());
         crate::print_cmd_info!(
             "Worker configuration",
             "Auto-selected {num_workers} prover worker(s) based on {hardware_threads} detected CPU thread(s); {memory_message}."
@@ -182,9 +165,9 @@ fn system_available_memory_bytes() -> Option<u64> {
     }
 }
 
-fn usable_memory_budget_bytes(available_bytes: u64) -> Option<u128> {
-    let utilization_percent = crate::consts::cli_consts::MEMORY_UTILIZATION_PERCENT as u128;
-    if utilization_percent == 0 {
+fn threads_supported_by_available_memory(available_bytes: u64) -> Option<usize> {
+    let per_thread_requirement = crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT as u128;
+    if per_thread_requirement == 0 {
         return None;
     }
 
@@ -193,21 +176,6 @@ fn usable_memory_budget_bytes(available_bytes: u64) -> Option<u128> {
         return None;
     }
 
-    let usable_bytes = available_bytes.saturating_mul(utilization_percent) / 100;
-
-    if usable_bytes == 0 {
-        None
-    } else {
-        Some(usable_bytes)
-    }
-}
-
-fn threads_supported_by_budget(budget_bytes: u128) -> usize {
-    let per_thread_requirement = crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT as u128;
-    if per_thread_requirement == 0 {
-        return 1;
-    }
-
-    let limit = (budget_bytes / per_thread_requirement) as usize;
-    limit.max(1)
+    let limit = (available_bytes / per_thread_requirement) as usize;
+    Some(limit.max(1))
 }
