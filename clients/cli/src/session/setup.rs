@@ -8,7 +8,7 @@ use crate::orchestrator::OrchestratorClient;
 use crate::runtime::start_authenticated_worker;
 use ed25519_dalek::SigningKey;
 use std::error::Error;
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::System;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
@@ -32,28 +32,28 @@ pub struct SessionData {
 }
 
 /// Warn the user if their available memory seems insufficient for the task(s) at hand
-pub fn warn_memory_configuration(max_threads: Option<u32>) {
-    if let Some(threads) = max_threads {
-        let current_pid = Pid::from(std::process::id() as usize);
+pub fn warn_memory_configuration(thread_count: usize, available_memory_bytes: Option<u64>) {
+    if thread_count == 0 {
+        return;
+    }
 
-        let mut sysinfo = System::new();
-        sysinfo.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[current_pid]),
-            true, // Refresh exact processes
-            ProcessRefreshKind::nothing().with_memory(),
-        );
+    if let Some(available_bytes) = available_memory_bytes {
+        let required_bytes = (thread_count as u128)
+            * (crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT as u128);
+        let available_bytes = available_bytes as u128;
 
-        if let Some(process) = sysinfo.process(current_pid) {
-            let ram_total = process.memory();
-            if threads as u64 * crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT >= ram_total
-            {
-                crate::print_cmd_warn!(
-                    "OOM warning",
-                    "Projected memory usage across {} requested threads exceeds memory currently available to process. In the event that proving fails due to an out-of-memory error, please restart the Nexus CLI with a smaller value supplied to `--max-threads`.",
-                    threads
-                );
-                std::thread::sleep(std::time::Duration::from_secs(3));
-            }
+        if required_bytes > available_bytes {
+            let required_gib = required_bytes as f64 / 1024_f64.powi(3);
+            let available_gib = available_bytes as f64 / 1024_f64.powi(3);
+
+            crate::print_cmd_warn!(
+                "OOM warning",
+                "Estimated memory usage (~{:.1} GiB) for {} thread(s) exceeds available memory (~{:.1} GiB). If proving fails due to an out-of-memory error, please restart the Nexus CLI with a smaller value supplied to `--max-threads`.",
+                required_gib,
+                thread_count,
+                available_gib
+            );
+            std::thread::sleep(std::time::Duration::from_secs(3));
         }
     }
 }
@@ -93,12 +93,36 @@ pub async fn setup_session(
     // Create orchestrator client
     let orchestrator_client = OrchestratorClient::new(env.clone());
 
-    // Warn the user if the memory demands of their configuration is risky
-    if check_mem {
-        warn_memory_configuration(max_threads);
+    let available_memory_bytes = system_available_memory_bytes();
+    let hardware_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1_usize);
+    let memory_limited_threads =
+        available_memory_bytes.and_then(|bytes| threads_supported_by_available_memory(bytes));
+
+    let auto_threads = memory_limited_threads
+        .map(|limit| limit.min(hardware_threads))
+        .unwrap_or(hardware_threads)
+        .max(1);
+
+    let num_workers: usize = max_threads
+        .map(|threads| threads.max(1) as usize)
+        .unwrap_or(auto_threads);
+
+    if max_threads.is_none() {
+        let memory_message = memory_limited_threads
+            .map(|limit| format!("memory suggests up to {limit} thread(s)"))
+            .unwrap_or_else(|| "memory estimate unavailable".to_string());
+        crate::print_cmd_info!(
+            "Worker configuration",
+            "Auto-selected {num_workers} prover worker(s) based on {hardware_threads} detected CPU thread(s); {memory_message}."
+        );
     }
 
-    let num_workers: usize = max_threads.unwrap_or(1) as usize;
+    // Warn the user if the memory demands of their configuration is risky
+    if check_mem {
+        warn_memory_configuration(num_workers, available_memory_bytes);
+    }
     // Create shutdown channel - only one shutdown signal needed
     let (shutdown_sender, _) = broadcast::channel(1);
 
@@ -128,4 +152,30 @@ pub async fn setup_session(
         orchestrator: orchestrator_client,
         num_workers,
     })
+}
+
+fn system_available_memory_bytes() -> Option<u64> {
+    let mut system = System::new();
+    system.refresh_memory();
+    let available_kib = system.available_memory();
+    if available_kib == 0 {
+        None
+    } else {
+        available_kib.checked_mul(1024)
+    }
+}
+
+fn threads_supported_by_available_memory(available_bytes: u64) -> Option<usize> {
+    let per_thread_requirement = crate::consts::cli_consts::PROJECTED_MEMORY_REQUIREMENT as u128;
+    if per_thread_requirement == 0 {
+        return None;
+    }
+
+    let available_bytes = available_bytes as u128;
+    if available_bytes == 0 {
+        return None;
+    }
+
+    let limit = (available_bytes / per_thread_requirement) as usize;
+    Some(limit.max(1))
 }
