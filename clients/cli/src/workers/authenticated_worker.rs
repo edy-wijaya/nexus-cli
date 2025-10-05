@@ -85,8 +85,8 @@ impl AuthenticatedWorker {
                         if should_exit {
                             break;
                         }
-                        // Natural rate limiting through work cycle
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        // Yield to the runtime without enforcing an artificial delay.
+                        tokio::task::yield_now().await;
                     }
                 }
             }
