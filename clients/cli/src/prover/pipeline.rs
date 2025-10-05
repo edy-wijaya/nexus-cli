@@ -8,9 +8,9 @@ use super::types::ProverError;
 use crate::analytics::track_verification_failed;
 use crate::environment::Environment;
 use crate::task::Task;
-use futures::future::join_all;
 use nexus_sdk::stwo::seq::Proof;
 use sha3::{Digest, Keccak256};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 /// Orchestrates the complete proving pipeline
@@ -55,94 +55,127 @@ impl ProvingPipeline {
         let environment_shared = Arc::new(environment.clone());
         let client_id_shared = Arc::new(client_id.to_string());
 
-        // Create a semaphore with a specific number of permits
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(*num_workers));
-
         // Create cancellation token for graceful shutdown
         let cancellation_token = CancellationToken::new();
 
-        // Spawn all tasks in parallel
-        let handles: Vec<_> = all_inputs
-            .iter()
-            .enumerate()
-            .map(|(input_index, input_data)| {
-                let task_ref = Arc::clone(&task_shared);
-                let environment_ref = Arc::clone(&environment_shared);
-                let client_id_ref = Arc::clone(&client_id_shared);
-                let input_data = input_data.clone();
-                let semaphore_ref = Arc::clone(&semaphore);
-                let cancellation_ref = cancellation_token.clone();
+        // Limit the number of concurrent proving jobs to the configured workers
+        let concurrency_limit = (*num_workers).max(1);
+        let mut pending_inputs = all_inputs.iter().cloned().enumerate();
+        let mut join_set: JoinSet<Result<(Proof, String, usize), (usize, ProverError)>> =
+            JoinSet::new();
 
-                tokio::spawn(async move {
-                    // Check for cancellation before starting
-                    if cancellation_ref.is_cancelled() {
-                        return Err(ProverError::MalformedTask("Task cancelled".to_string()));
-                    }
-
-                    // Acquire a permit from the semaphore. This waits if the limit is reached.
-                    let _permit = semaphore_ref.acquire_owned().await;
-
-                    // Check for cancellation after acquiring permit
-                    if cancellation_ref.is_cancelled() {
-                        return Err(ProverError::MalformedTask("Task cancelled".to_string()));
-                    }
-
-                    // Step 1: Parse and validate input
-                    let inputs = InputParser::parse_triple_input(&input_data)?;
-
-                    // Step 2: Generate and verify proof
-                    let proof = ProvingEngine::prove_and_validate(
-                        &inputs,
-                        &task_ref,
-                        &environment_ref,
-                        &client_id_ref,
-                    )
-                    .await?;
-
-                    // Step 3: Generate proof hash
-                    let proof_hash = Self::generate_proof_hash(&proof);
-
-                    Ok((proof, proof_hash, input_index))
-                })
-            })
-            .collect();
-
-        // Use join_all for better parallelization
-        let results = join_all(handles).await;
-
-        // Process results and collect verification failures for batch handling
-        let mut all_proofs = Vec::new();
-        let mut proof_hashes = Vec::new();
+        // Pre-allocate storage for deterministically ordered results
+        let total_inputs = all_inputs.len();
+        let mut proofs_by_index: Vec<Option<Proof>> = Vec::with_capacity(total_inputs);
+        proofs_by_index.resize_with(total_inputs, || None);
+        let mut hashes_by_index: Vec<Option<String>> = Vec::with_capacity(total_inputs);
+        hashes_by_index.resize_with(total_inputs, || None);
         let mut verification_failures = Vec::new();
 
-        for (result_index, result) in results.into_iter().enumerate() {
-            match result {
-                Ok(Ok((proof, proof_hash, _input_index))) => {
-                    all_proofs.push(proof);
-                    proof_hashes.push(proof_hash);
+        // Helper to spawn a proving job respecting cancellation
+        let spawn_job = |join_set: &mut JoinSet<_>, input_index: usize, input_data: Vec<u8>| {
+            let task_ref = Arc::clone(&task_shared);
+            let environment_ref = Arc::clone(&environment_shared);
+            let client_id_ref = Arc::clone(&client_id_shared);
+            let cancellation_ref = cancellation_token.clone();
+
+            join_set.spawn(async move {
+                if cancellation_ref.is_cancelled() {
+                    return Err((
+                        input_index,
+                        ProverError::MalformedTask("Task cancelled".to_string()),
+                    ));
                 }
-                Ok(Err(e)) => {
-                    // Collect verification failures for batch processing
-                    match e {
+
+                let inputs =
+                    InputParser::parse_triple_input(&input_data).map_err(|e| (input_index, e))?;
+
+                if cancellation_ref.is_cancelled() {
+                    return Err((
+                        input_index,
+                        ProverError::MalformedTask("Task cancelled".to_string()),
+                    ));
+                }
+
+                let proof = ProvingEngine::prove_and_validate(
+                    &inputs,
+                    &task_ref,
+                    &environment_ref,
+                    &client_id_ref,
+                )
+                .await
+                .map_err(|e| (input_index, e))?;
+
+                if cancellation_ref.is_cancelled() {
+                    return Err((
+                        input_index,
+                        ProverError::MalformedTask("Task cancelled".to_string()),
+                    ));
+                }
+
+                let proof_hash = Self::generate_proof_hash(&proof);
+
+                Ok((proof, proof_hash, input_index))
+            });
+        };
+
+        // Fill the initial window of concurrent jobs
+        for _ in 0..concurrency_limit {
+            if let Some((input_index, input_data)) = pending_inputs.next() {
+                spawn_job(&mut join_set, input_index, input_data);
+            }
+        }
+
+        let mut fatal_error: Option<ProverError> = None;
+
+        while let Some(join_result) = join_set.join_next().await {
+            match join_result {
+                Ok(Ok((proof, proof_hash, input_index))) => {
+                    proofs_by_index[input_index] = Some(proof);
+                    hashes_by_index[input_index] = Some(proof_hash);
+                }
+                Ok(Err((input_index, error))) => {
+                    if cancellation_token.is_cancelled()
+                        && matches!(
+                            error,
+                            ProverError::MalformedTask(ref msg) if msg == "Task cancelled"
+                        )
+                    {
+                        continue;
+                    }
+
+                    match error {
                         ProverError::Stwo(_) | ProverError::GuestProgram(_) => {
                             verification_failures.push((
                                 task_shared.clone(),
-                                format!("Input {}: {}", result_index, e),
+                                format!("Input {}: {}", input_index, error),
                                 environment_shared.clone(),
                                 client_id_shared.clone(),
                             ));
                         }
-                        _ => {
-                            // Cancel remaining tasks on critical errors
+                        other => {
                             cancellation_token.cancel();
-                            return Err(e);
+                            fatal_error = Some(other);
+                            break;
                         }
                     }
                 }
                 Err(join_error) => {
-                    return Err(ProverError::JoinError(join_error));
+                    cancellation_token.cancel();
+                    fatal_error = Some(ProverError::JoinError(join_error));
+                    break;
                 }
             }
+
+            if let Some((next_index, next_input)) = pending_inputs.next() {
+                spawn_job(&mut join_set, next_index, next_input);
+            }
+        }
+
+        if fatal_error.is_some() {
+            join_set.abort_all();
+            while join_set.join_next().await.is_some() {}
+            return Err(fatal_error.unwrap());
         }
 
         // Handle all verification failures in batch (avoid nested spawns)
@@ -163,6 +196,23 @@ impl ProvingPipeline {
                 failure_count
             )));
         }
+
+        if proofs_by_index.iter().any(|entry| entry.is_none())
+            || hashes_by_index.iter().any(|entry| entry.is_none())
+        {
+            return Err(ProverError::MalformedTask(
+                "Incomplete proof results after proving".to_string(),
+            ));
+        }
+
+        let all_proofs = proofs_by_index
+            .into_iter()
+            .map(|entry| entry.expect("proof present checked"))
+            .collect::<Vec<_>>();
+        let proof_hashes = hashes_by_index
+            .into_iter()
+            .map(|entry| entry.expect("hash present checked"))
+            .collect::<Vec<_>>();
 
         let final_proof_hash = Self::combine_proof_hashes(&task_shared, &proof_hashes);
 

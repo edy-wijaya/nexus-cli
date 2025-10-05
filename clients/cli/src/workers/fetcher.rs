@@ -316,7 +316,7 @@ mod tests {
     fn create_test_fetcher() -> TaskFetcher {
         let (event_sender, _event_receiver) = mpsc::channel(100);
         let event_sender = crate::workers::core::EventSender::new(event_sender);
-        let config = WorkerConfig::new(Environment::Production, "test_client".to_string());
+        let config = WorkerConfig::new(Environment::Production, "test_client".to_string(), 1);
 
         TaskFetcher::new(
             12345,

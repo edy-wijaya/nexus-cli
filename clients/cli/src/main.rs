@@ -30,11 +30,11 @@ use crate::register::{register_node, register_user};
 use crate::session::{run_headless_mode, run_tui_mode, setup_session};
 use crate::version::manager::validate_version_requirements;
 use clap::{ArgAction, Parser, Subcommand};
+use mimalloc::MiMalloc;
 use postcard::to_allocvec;
 use std::error::Error;
 use std::io::Write;
 use std::process::exit;
-use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
