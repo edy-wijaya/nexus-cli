@@ -27,15 +27,7 @@ pub mod cli_consts {
     pub const SUBPROCESS_INTERNAL_ERROR_CODE: i32 = 3;
 
     /// "Reasonable" generic projection task memory requirement.
-    /// Lowered to 3 GiB to allow more aggressive parallelism on machines
-    /// with ample memory while still leaving headroom for the OS and other
-    /// background processes.
-    pub const PROJECTED_MEMORY_REQUIREMENT: u64 = 3_221_225_472; // 3 GiB
-
-    /// Percentage of the reported free memory that the auto-thread selection
-    /// logic is allowed to consume. Keeping this slightly below 100% leaves
-    /// additional safety margin for system allocators and transient spikes.
-    pub const MEMORY_UTILIZATION_PERCENT: u32 = 90;
+    pub const PROJECTED_MEMORY_REQUIREMENT: u64 = 4294967296; // 4gb
 
     // =============================================================================
     // DIFFICULTY CONFIGURATION
