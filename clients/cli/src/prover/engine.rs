@@ -94,9 +94,17 @@ impl ProvingEngine {
         // Deserialize proof from subprocess stdout
         let proof: Proof = from_bytes(&output.stdout)?;
 
-        // Verify proof in main process
-        let verify_prover = Self::create_fib_prover()?;
-        verifier::ProofVerifier::verify_proof(&proof, inputs, &verify_prover)?;
+        // Verify proof in main process using a blocking task to avoid stalling the async runtime
+        let inputs_copy = *inputs;
+        let proof = tokio::task::spawn_blocking(move || -> Result<Proof, ProverError> {
+            let verify_prover = Self::create_fib_prover()?;
+            verifier::ProofVerifier::verify_proof(&proof, &inputs_copy, &verify_prover)?;
+            Ok(proof)
+        })
+        .await
+        .map_err(ProverError::JoinError)?;
+
+        let proof = proof?;
 
         Ok(proof)
     }

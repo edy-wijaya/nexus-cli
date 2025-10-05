@@ -97,7 +97,7 @@ pub async fn setup_session(
     if check_mem {
         warn_memory_configuration(max_threads);
     }
-    
+
     let num_workers: usize = max_threads.unwrap_or(1) as usize;
     // Create shutdown channel - only one shutdown signal needed
     let (shutdown_sender, _) = broadcast::channel(1);
